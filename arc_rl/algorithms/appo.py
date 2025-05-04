@@ -92,24 +92,13 @@ class APPO:
 
         # APPO components
         self.policy = policy
-        # print("Policy attributes:", dir(self.policy)) ## HERE
         self.policy.to(self.device)
         # Create optimizer
-        # self.actor_optimizer = optim.Adam(self.policy.actor.parameters(), lr=actor_learning_rate)  # actor optimizer
         self.actor_optimizer = optim.Adam(list(self.policy.actor.parameters()) + [self.policy.std], lr=actor_learning_rate)  # actor optimizer
-        # actor_params = list(self.policy.actor.parameters())
-        # print("Actor param count:", sum(p.numel() for p in actor_params)) ## HERE
         self.critic_optimizer = optim.Adam(self.policy.critic.parameters(), lr=critic_learning_rate)  # critic optimizer
         # Create rollout storage
         self.storage: RolloutStorage = None  # type: ignore
         self.transition = RolloutStorage.Transition()
-        ## HERE
-        # print("Actor optimizer parameters:")
-        # for i, group in enumerate(self.actor_optimizer.param_groups):
-        #     print(f" Param group {i}:")
-        #     for p in group["params"]:
-        #         print(f" - Param shape: {p.shape}, requires_grad: {p.requires_grad}")
-
 
         # APPO parameters
         self.clip_param = clip_param
