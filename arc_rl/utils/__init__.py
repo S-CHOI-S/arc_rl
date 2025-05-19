@@ -14,3 +14,5 @@ from .utils import (
 )
 
 from .isaaclab_cfg import *
+from .symmetry_cfg import *
+from .rnd_cfg import *

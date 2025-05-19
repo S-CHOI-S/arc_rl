@@ -10,6 +10,8 @@ from typing import Literal
 
 from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
+from .rnd_cfg import ArcRlRndCfg
+from .symmetry_cfg import ArcRlSymmetryCfg
 
 #########################
 # Policy configurations #
@@ -92,10 +94,10 @@ class ArcRlAppoAlgorithmCfg:
     Otherwise, the advantage is normalized over the mini-batches only.
     """
 
-    symmetry_cfg: RslRlSymmetryCfg | None = None
+    symmetry_cfg: ArcRlSymmetryCfg | None = None
     """The symmetry configuration. Default is None, in which case symmetry is not used."""
 
-    rnd_cfg: RslRlRndCfg | None = None
+    rnd_cfg: ArcRlRndCfg | None = None
     """The configuration for the Random Network Distillation (RND) module. Default is None,
     in which case RND is not used.
     """
