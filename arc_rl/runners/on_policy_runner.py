@@ -12,7 +12,7 @@ import torch
 from collections import deque
 
 import arc_rl
-from arc_rl.algorithms import PPO, APPO, Distillation
+from arc_rl.algorithms import APPO, PPO, Distillation
 from arc_rl.env import VecEnv
 from arc_rl.modules import (
     ActorCritic,
@@ -91,9 +91,20 @@ class OnPolicyRunner:
             # this is used by the symmetry function for handling different observation terms
             self.alg_cfg["symmetry_cfg"]["_env"] = env
 
+        if "auxiliary_cfg" in self.alg_cfg and self.alg_cfg["auxiliary_cfg"] is not None:
+            from arc_rl.modules.aux_mlp import AuxiliaryMLP
+
+            self.alg_cfg["auxiliary_lr"] = self.alg_cfg["auxiliary_cfg"]["learning_rate"]
+            auxiliary_model = AuxiliaryMLP(
+                input_dim=num_obs, output_dim=3, hidden_dims=self.alg_cfg["auxiliary_cfg"]["hidden_dims"]
+            )
+            self.alg_cfg["auxiliary_cfg"] = auxiliary_model
+
         # initialize algorithm
         alg_class = eval(self.alg_cfg.pop("class_name"))
-        self.alg: PPO | Distillation | APPO = alg_class(policy, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg)
+        self.alg: PPO | Distillation | APPO = alg_class(
+            policy, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg
+        )
 
         # store training configuration
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
@@ -322,7 +333,7 @@ class OnPolicyRunner:
         # -- Losses
         for key, value in locs["loss_dict"].items():
             self.writer.add_scalar(f"Loss/{key}", value, locs["it"])
-        if hasattr(self.alg, 'learning_rate'):
+        if hasattr(self.alg, "learning_rate"):
             self.writer.add_scalar("Loss/learning_rate", self.alg.learning_rate, locs["it"])
         elif isinstance(self.alg, APPO):
             self.writer.add_scalar("Loss/actor_learning_rate", self.alg.actor_learning_rate, locs["it"])
@@ -404,7 +415,7 @@ class OnPolicyRunner:
             "infos": infos,
         }
         # -- Check and save optimizer(s)
-        if hasattr(self.alg, 'optimizer'):
+        if hasattr(self.alg, "optimizer"):
             saved_dict["optimizer_state_dict"] = self.alg.optimizer.state_dict()
         else:
             if isinstance(self.alg, APPO):
@@ -418,6 +429,10 @@ class OnPolicyRunner:
         if self.empirical_normalization:
             saved_dict["obs_norm_state_dict"] = self.obs_normalizer.state_dict()
             saved_dict["privileged_obs_norm_state_dict"] = self.privileged_obs_normalizer.state_dict()
+        # -- Save auxiliary model if used:
+        if self.alg.auxiliary:
+            saved_dict["auxiliary_state_dict"] = self.alg.auxiliary.state_dict()
+            saved_dict["auxiliary_optimizer_state_dict"] = self.alg.auxiliary_optimizer.state_dict()
 
         # save model
         torch.save(saved_dict, path)
@@ -433,6 +448,9 @@ class OnPolicyRunner:
         # -- Load RND model if used
         if self.alg.rnd:
             self.alg.rnd.load_state_dict(loaded_dict["rnd_state_dict"])
+        # -- Load Auxiliary model if used
+        if "auxiliary_state_dict" in loaded_dict and self.alg.auxiliary:
+            self.alg.auxiliary.load_state_dict(loaded_dict["auxiliary_state_dict"])
         # -- Load observation normalizer if used
         if self.empirical_normalization:
             if resumed_training:
@@ -457,6 +475,9 @@ class OnPolicyRunner:
             # -- RND optimizer if used
             if self.alg.rnd:
                 self.alg.rnd_optimizer.load_state_dict(loaded_dict["rnd_optimizer_state_dict"])
+            # -- Auxiliary optimizer if used
+            if self.alg.auxiliary:
+                self.alg.auxiliary_optimizer.load_state_dict(loaded_dict["auxiliary_optimizer_state_dict"])
         # -- load current learning iteration
         if resumed_training:
             self.current_learning_iteration = loaded_dict["iter"]
@@ -483,6 +504,9 @@ class OnPolicyRunner:
         if self.empirical_normalization:
             self.obs_normalizer.train()
             self.privileged_obs_normalizer.train()
+        # -- Auxiliary
+        if self.alg.auxiliary:
+            self.alg.auxiliary.train()
 
     def eval_mode(self):
         # -- PPO
@@ -494,6 +518,9 @@ class OnPolicyRunner:
         if self.empirical_normalization:
             self.obs_normalizer.eval()
             self.privileged_obs_normalizer.eval()
+        # -- Auxiliary
+        if self.alg.auxiliary:
+            self.alg.auxiliary.eval()
 
     def add_git_repo_to_log(self, repo_file_path):
         self.git_status_repos.append(repo_file_path)
@@ -528,16 +555,20 @@ class OnPolicyRunner:
 
         # check if user has device specified for local rank
         if self.device != f"cuda:{self.gpu_local_rank}":
-            raise ValueError(f"Device '{self.device}' does not match expected device for local rank '{self.gpu_local_rank}'.")
+            raise ValueError(
+                f"Device '{self.device}' does not match expected device for local rank '{self.gpu_local_rank}'."
+            )
         # validate multi-gpu configuration
         if self.gpu_local_rank >= self.gpu_world_size:
-            raise ValueError(f"Local rank '{self.gpu_local_rank}' is greater than or equal to world size '{self.gpu_world_size}'.")
+            raise ValueError(
+                f"Local rank '{self.gpu_local_rank}' is greater than or equal to world size '{self.gpu_world_size}'."
+            )
         if self.gpu_global_rank >= self.gpu_world_size:
-            raise ValueError(f"Global rank '{self.gpu_global_rank}' is greater than or equal to world size '{self.gpu_world_size}'.")
+            raise ValueError(
+                f"Global rank '{self.gpu_global_rank}' is greater than or equal to world size '{self.gpu_world_size}'."
+            )
 
         # initialize torch distributed
-        torch.distributed.init_process_group(
-            backend="nccl", rank=self.gpu_global_rank, world_size=self.gpu_world_size
-        )
+        torch.distributed.init_process_group(backend="nccl", rank=self.gpu_global_rank, world_size=self.gpu_world_size)
         # set device to the local rank
         torch.cuda.set_device(self.gpu_local_rank)

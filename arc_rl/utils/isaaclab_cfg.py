@@ -1,3 +1,8 @@
+# Copyright (c) 2021-2025, ETH Zurich and NVIDIA CORPORATION
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # Copyright (c) 2022-2025, The Isaac Lab Project Developers.
 # All rights reserved.
 #
@@ -10,6 +15,7 @@ from typing import Literal
 
 from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
+
 from .rnd_cfg import ArcRlRndCfg
 from .symmetry_cfg import ArcRlSymmetryCfg
 
@@ -21,12 +27,14 @@ from .symmetry_cfg import ArcRlSymmetryCfg
 @configclass
 class ArcRlPpoActorCriticCfg(RslRlPpoActorCriticCfg):
     """Configuration for the PPO actor-critic networks."""
+
     pass
 
 
 @configclass
 class ArcRlPpoActorCriticRecurrentCfg(ArcRlPpoActorCriticCfg):
     """Configuration for the PPO actor-critic networks with recurrent layers."""
+
     pass
 
 
@@ -38,6 +46,7 @@ class ArcRlPpoActorCriticRecurrentCfg(ArcRlPpoActorCriticCfg):
 @configclass
 class ArcRlPpoAlgorithmCfg(RslRlPpoAlgorithmCfg):
     """Configuration for the PPO algorithm."""
+
     pass
 
 
@@ -111,4 +120,5 @@ class ArcRlAppoAlgorithmCfg:
 @configclass
 class ArcRlOnPolicyRunnerCfg(RslRlOnPolicyRunnerCfg):
     """Configuration of the runner for on-policy algorithms."""
+
     pass

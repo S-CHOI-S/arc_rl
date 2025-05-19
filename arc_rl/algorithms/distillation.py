@@ -26,6 +26,9 @@ class Distillation:
         gradient_length=15,
         learning_rate=1e-3,
         loss_type="mse",
+        # Auxiliary parameters
+        auxiliary_cfg: nn.Module | None = None,
+        auxiliary_lr: float = 1e-3,
         device="cpu",
         # Distributed training parameters
         multi_gpu_cfg: dict | None = None,
@@ -63,6 +66,16 @@ class Distillation:
             self.loss_fn = nn.functional.huber_loss
         else:
             raise ValueError(f"Unknown loss type: {loss_type}. Supported types are: mse, huber")
+
+        # Auxiliary parameters
+        if auxiliary_cfg is not None:
+            # Create auxiliary network
+            self.auxiliary = auxiliary_cfg
+            self.auxiliary.to(self.device)
+            self.auxiliary_optimizer = torch.optim.Adam(self.auxiliary.parameters(), lr=auxiliary_lr)
+        else:
+            self.auxiliary = None
+            self.auxiliary_optimizer = None
 
         self.num_updates = 0
 

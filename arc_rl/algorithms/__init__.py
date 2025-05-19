@@ -5,8 +5,8 @@
 
 """Implementation of different RL agents."""
 
+from .appo import APPO
 from .distillation import Distillation
 from .ppo import PPO
-from .appo import APPO
 
 __all__ = ["PPO", "Distillation", "APPO"]

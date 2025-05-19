@@ -37,6 +37,9 @@ class PPO:
         use_clipped_value_loss=True,
         schedule="fixed",
         desired_kl=0.01,
+        # Auxiliary parameters
+        auxiliary_cfg: nn.Module | None = None,
+        auxiliary_lr: float = 1e-3,
         device="cpu",
         normalize_advantage_per_mini_batch=False,
         # RND parameters
@@ -112,6 +115,16 @@ class PPO:
         self.schedule = schedule
         self.learning_rate = learning_rate
         self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
+
+        # Auxiliary parameters
+        if auxiliary_cfg is not None:
+            # Create auxiliary network
+            self.auxiliary = auxiliary_cfg
+            self.auxiliary.to(self.device)
+            self.auxiliary_optimizer = torch.optim.Adam(self.auxiliary.parameters(), lr=auxiliary_lr)
+        else:
+            self.auxiliary = None
+            self.auxiliary_optimizer = None
 
     def init_storage(
         self, training_type, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, actions_shape
@@ -367,6 +380,16 @@ class PPO:
                 mseloss = torch.nn.MSELoss()
                 rnd_loss = mseloss(predicted_embedding, target_embedding)
 
+            if self.auxiliary is not None and self.auxiliary_optimizer is not None:
+                base_velocity_target = critic_obs_batch[:, :3]
+
+                auxiliary_pred = self.auxiliary(obs_batch.detach())
+                auxiliary_loss = nn.functional.mse_loss(auxiliary_pred, base_velocity_target)
+
+                self.auxiliary_optimizer.zero_grad()
+                auxiliary_loss.backward()
+                self.auxiliary_optimizer.step()
+
             # Compute the gradients
             # -- For PPO
             self.optimizer.zero_grad()
@@ -423,6 +446,8 @@ class PPO:
             loss_dict["rnd"] = mean_rnd_loss
         if self.symmetry:
             loss_dict["symmetry"] = mean_symmetry_loss
+        if self.auxiliary:
+            loss_dict["auxiliary"] = auxiliary_loss.item()
 
         return loss_dict
 

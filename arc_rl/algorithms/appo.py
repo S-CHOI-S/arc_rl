@@ -1,3 +1,8 @@
+# Copyright (c) 2021-2025, ETH Zurich and NVIDIA CORPORATION
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # ******************************************************************************
 #  ARC_RL
 #
@@ -78,9 +83,7 @@ class APPO:
             self.rnd = RandomNetworkDistillation(device=self.device, **rnd_cfg)
             # Create RND optimizer
             params = self.rnd.predictor.parameters()
-            self.rnd_optimizer = optim.Adam(
-                params, lr=rnd_cfg.get("learning_rate", 1e-3)
-            )
+            self.rnd_optimizer = optim.Adam(params, lr=rnd_cfg.get("learning_rate", 1e-3))
         else:
             self.rnd = None
             self.rnd_optimizer = None
@@ -88,23 +91,15 @@ class APPO:
         # Symmetry components
         if symmetry_cfg is not None:
             # Check if symmetry is enabled
-            use_symmetry = (
-                symmetry_cfg["use_data_augmentation"] or symmetry_cfg["use_mirror_loss"]
-            )
+            use_symmetry = symmetry_cfg["use_data_augmentation"] or symmetry_cfg["use_mirror_loss"]
             # Print that we are not using symmetry
             if not use_symmetry:
-                print(
-                    "Symmetry not used for learning. We will use it for logging instead."
-                )
+                print("Symmetry not used for learning. We will use it for logging instead.")
             # If function is a string then resolve it to a function
             if isinstance(symmetry_cfg["data_augmentation_func"], str):
-                symmetry_cfg["data_augmentation_func"] = string_to_callable(
-                    symmetry_cfg["data_augmentation_func"]
-                )
+                symmetry_cfg["data_augmentation_func"] = string_to_callable(symmetry_cfg["data_augmentation_func"])
             # Check valid configuration
-            if symmetry_cfg["use_data_augmentation"] and not callable(
-                symmetry_cfg["data_augmentation_func"]
-            ):
+            if symmetry_cfg["use_data_augmentation"] and not callable(symmetry_cfg["data_augmentation_func"]):
                 raise ValueError(
                     "Data augmentation enabled but the function is not callable:"
                     f" {symmetry_cfg['data_augmentation_func']}"
@@ -122,9 +117,7 @@ class APPO:
             list(self.policy.actor.parameters()) + [self.policy.std],
             lr=actor_learning_rate,
         )  # actor optimizer
-        self.critic_optimizer = optim.Adam(
-            self.policy.critic.parameters(), lr=critic_learning_rate
-        )  # critic optimizer
+        self.critic_optimizer = optim.Adam(self.policy.critic.parameters(), lr=critic_learning_rate)  # critic optimizer
         # Create rollout storage
         self.storage: RolloutStorage = None  # type: ignore
         self.transition = RolloutStorage.Transition()
@@ -150,9 +143,7 @@ class APPO:
             # Create auxiliary network
             self.auxiliary = auxiliary_cfg
             self.auxiliary.to(self.device)
-            self.auxiliary_optimizer = torch.optim.Adam(
-                self.auxiliary.parameters(), lr=auxiliary_lr
-            )
+            self.auxiliary_optimizer = torch.optim.Adam(self.auxiliary.parameters(), lr=auxiliary_lr)
         else:
             self.auxiliary = None
             self.auxiliary_optimizer = None
@@ -189,9 +180,7 @@ class APPO:
         # compute the actions and values
         self.transition.actions = self.policy.act(obs).detach()
         self.transition.values = self.policy.evaluate(critic_obs).detach()
-        self.transition.actions_log_prob = self.policy.get_actions_log_prob(
-            self.transition.actions
-        ).detach()
+        self.transition.actions_log_prob = self.policy.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.policy.action_mean.detach()
         self.transition.action_sigma = self.policy.action_std.detach()
         # need to record obs and critic_obs before env.step()
@@ -220,8 +209,7 @@ class APPO:
         # Bootstrapping on time outs
         if "time_outs" in infos:
             self.transition.rewards += self.gamma * torch.squeeze(
-                self.transition.values
-                * infos["time_outs"].unsqueeze(1).to(self.device),
+                self.transition.values * infos["time_outs"].unsqueeze(1).to(self.device),
                 1,
             )
 
@@ -257,13 +245,9 @@ class APPO:
 
         # generator for mini batches
         if self.policy.is_recurrent:
-            generator = self.storage.recurrent_mini_batch_generator(
-                self.num_mini_batches, self.num_learning_epochs
-            )
+            generator = self.storage.recurrent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
-            generator = self.storage.mini_batch_generator(
-                self.num_mini_batches, self.num_learning_epochs
-            )
+            generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
 
         # iterate over batches
         for (
@@ -290,9 +274,7 @@ class APPO:
             # check if we should normalize advantages per mini batch
             if self.normalize_advantage_per_mini_batch:
                 with torch.no_grad():
-                    advantages_batch = (advantages_batch - advantages_batch.mean()) / (
-                        advantages_batch.std() + 1e-8
-                    )
+                    advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
 
             # Perform symmetric augmentation
             if self.symmetry and self.symmetry["use_data_augmentation"]:
@@ -315,9 +297,7 @@ class APPO:
                 num_aug = int(obs_batch.shape[0] / original_batch_size)
                 # repeat the rest of the batch
                 # -- actor
-                old_actions_log_prob_batch = old_actions_log_prob_batch.repeat(
-                    num_aug, 1
-                )
+                old_actions_log_prob_batch = old_actions_log_prob_batch.repeat(num_aug, 1)
                 # -- critic
                 target_values_batch = target_values_batch.repeat(num_aug, 1)
                 advantages_batch = advantages_batch.repeat(num_aug, 1)
@@ -326,14 +306,10 @@ class APPO:
             # Recompute actions log prob and entropy for current batch of transitions
             # Note: we need to do this because we updated the policy with the new parameters
             # -- actor
-            self.policy.act(
-                obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0]
-            )
+            self.policy.act(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
             actions_log_prob_batch = self.policy.get_actions_log_prob(actions_batch)
             # -- critic
-            value_batch = self.policy.evaluate(
-                critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1]
-            )
+            value_batch = self.policy.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
             # -- entropy
             # we only keep the entropy of the first augmentation (the original one)
             mu_batch = self.policy.action_mean[:original_batch_size]
@@ -345,10 +321,7 @@ class APPO:
                 with torch.inference_mode():
                     kl = torch.sum(
                         torch.log(sigma_batch / old_sigma_batch + 1.0e-5)
-                        + (
-                            torch.square(old_sigma_batch)
-                            + torch.square(old_mu_batch - mu_batch)
-                        )
+                        + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch))
                         / (2.0 * torch.square(sigma_batch))
                         - 0.5,
                         axis=-1,
@@ -357,9 +330,7 @@ class APPO:
 
                     # Reduce the KL divergence across all GPUs
                     if self.is_multi_gpu:
-                        torch.distributed.all_reduce(
-                            kl_mean, op=torch.distributed.ReduceOp.SUM
-                        )
+                        torch.distributed.all_reduce(kl_mean, op=torch.distributed.ReduceOp.SUM)
                         kl_mean /= self.gpu_world_size
 
                     # Update the learning rate
@@ -368,19 +339,13 @@ class APPO:
                     #       then the learning rate should be the same across all GPUs.
                     if self.gpu_global_rank == 0:
                         if kl_mean > self.desired_kl * 2.0:
-                            self.actor_learning_rate = max(
-                                1e-5, self.actor_learning_rate / 1.5
-                            )
+                            self.actor_learning_rate = max(1e-5, self.actor_learning_rate / 1.5)
                         elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
-                            self.actor_learning_rate = min(
-                                1e-2, self.actor_learning_rate * 1.5
-                            )
+                            self.actor_learning_rate = min(1e-2, self.actor_learning_rate * 1.5)
 
                     # Update the learning rate for all GPUs
                     if self.is_multi_gpu:
-                        lr_tensor = torch.tensor(
-                            self.actor_learning_rate, device=self.device
-                        )
+                        lr_tensor = torch.tensor(self.actor_learning_rate, device=self.device)
                         torch.distributed.broadcast(lr_tensor, src=0)
                         self.actor_learning_rate = lr_tensor.item()
 
@@ -389,9 +354,7 @@ class APPO:
                         param_group["lr"] = self.actor_learning_rate
 
             # Surrogate loss
-            ratio = torch.exp(
-                actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch)
-            )
+            ratio = torch.exp(actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch))
             surrogate = -torch.squeeze(advantages_batch) * ratio
             surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(
                 ratio, 1.0 - self.clip_param, 1.0 + self.clip_param
@@ -400,9 +363,9 @@ class APPO:
 
             # Value function loss
             if self.use_clipped_value_loss:
-                value_clipped = target_values_batch + (
-                    value_batch - target_values_batch
-                ).clamp(-self.clip_param, self.clip_param)
+                value_clipped = target_values_batch + (value_batch - target_values_batch).clamp(
+                    -self.clip_param, self.clip_param
+                )
                 value_losses = (value_batch - returns_batch).pow(2)
                 value_losses_clipped = (value_clipped - returns_batch).pow(2)
                 value_loss = torch.max(value_losses, value_losses_clipped).mean()
@@ -427,9 +390,7 @@ class APPO:
                     num_aug = int(obs_batch.shape[0] / original_batch_size)
 
                 # actions predicted by the actor for symmetrically-augmented observations
-                mean_actions_batch = self.policy.act_inference(
-                    obs_batch.detach().clone()
-                )
+                mean_actions_batch = self.policy.act_inference(obs_batch.detach().clone())
 
                 # compute the symmetrically augmented actions
                 # note: we are assuming the first augmentation is the original one.
@@ -465,21 +426,11 @@ class APPO:
                 rnd_loss = mseloss(predicted_embedding, target_embedding)
 
             if self.auxiliary is not None and self.auxiliary_optimizer is not None:
-                # 예: velocity ground truth 가져오기
-                base_velocity_target = self.symmetry[
-                    "_env"
-                ].command_manager.get_command("base_velocity")[:, :2]
-                # obs_batch와 target batch 매칭 필요 시, 스케일 or slicing 필요
+                base_velocity_target = critic_obs_batch[:, :3]
 
-                # 예측
-                auxiliary_pred = self.auxiliary(
-                    obs_batch.detach()
-                )  # detach는 PPO 학습 영향 방지용
-                auxiliary_loss = nn.functional.mse_loss(
-                    auxiliary_pred, base_velocity_target
-                )
+                auxiliary_pred = self.auxiliary(obs_batch.detach())
+                auxiliary_loss = nn.functional.mse_loss(auxiliary_pred, base_velocity_target)
 
-                # 학습
                 self.auxiliary_optimizer.zero_grad()
                 auxiliary_loss.backward()
                 self.auxiliary_optimizer.step()
@@ -510,9 +461,7 @@ class APPO:
             nn.utils.clip_grad_norm_(self.policy.actor.parameters(), self.max_grad_norm)
             self.actor_optimizer.step()
             # ----- Critic update -----
-            nn.utils.clip_grad_norm_(
-                self.policy.critic.parameters(), self.max_grad_norm
-            )
+            nn.utils.clip_grad_norm_(self.policy.critic.parameters(), self.max_grad_norm)
             self.critic_optimizer.step()
             # -- For RND
             if self.rnd_optimizer:
@@ -581,17 +530,9 @@ class APPO:
         This function is called after the backward pass to synchronize the gradients across all GPUs.
         """
         # Create a tensor to store the gradients
-        grads = [
-            param.grad.view(-1)
-            for param in self.policy.parameters()
-            if param.grad is not None
-        ]
+        grads = [param.grad.view(-1) for param in self.policy.parameters() if param.grad is not None]
         if self.rnd:
-            grads += [
-                param.grad.view(-1)
-                for param in self.rnd.parameters()
-                if param.grad is not None
-            ]
+            grads += [param.grad.view(-1) for param in self.rnd.parameters() if param.grad is not None]
         all_grads = torch.cat(grads)
 
         # Average the gradients across all GPUs
@@ -609,8 +550,6 @@ class APPO:
             if param.grad is not None:
                 numel = param.numel()
                 # copy data back from shared buffer
-                param.grad.data.copy_(
-                    all_grads[offset : offset + numel].view_as(param.grad.data)
-                )
+                param.grad.data.copy_(all_grads[offset : offset + numel].view_as(param.grad.data))
                 # update the offset for the next parameter
                 offset += numel

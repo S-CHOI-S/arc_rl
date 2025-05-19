@@ -5,6 +5,9 @@
 
 """Helper functions."""
 
+from .isaaclab_cfg import *
+from .rnd_cfg import *
+from .symmetry_cfg import *
 from .utils import (
     resolve_nn_activation,
     split_and_pad_trajectories,
@@ -12,7 +15,3 @@ from .utils import (
     string_to_callable,
     unpad_trajectories,
 )
-
-from .isaaclab_cfg import *
-from .symmetry_cfg import *
-from .rnd_cfg import *

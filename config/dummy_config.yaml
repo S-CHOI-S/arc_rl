@@ -25,23 +25,23 @@ algorithm:
 
   # -- Random Network Distillation
   rnd_cfg:
-      weight: 0.0  # initial weight of the RND reward
+    weight: 0.0  # initial weight of the RND reward
 
-      # note: This is a dictionary with a required key called "mode".
-      #   Please check the RND module for more information.
-      weight_schedule: null
+    # note: This is a dictionary with a required key called "mode".
+    #   Please check the RND module for more information.
+    weight_schedule: null
 
-      reward_normalization: false  # whether to normalize RND reward
-      state_normalization: true  # whether to normalize RND state observations
+    reward_normalization: false  # whether to normalize RND reward
+    state_normalization: true  # whether to normalize RND state observations
 
-      # -- Learning parameters
-      learning_rate: 0.001  # learning rate for RND
+    # -- Learning parameters
+    learning_rate: 0.001  # learning rate for RND
 
-      # -- Network parameters
-      # note: if -1, then the network will use dimensions of the observation
-      num_outputs: 1  # number of outputs of RND network
-      predictor_hidden_dims: [-1] # hidden dimensions of predictor network
-      target_hidden_dims: [-1]  # hidden dimensions of target network
+    # -- Network parameters
+    # note: if -1, then the network will use dimensions of the observation
+    num_outputs: 1  # number of outputs of RND network
+    predictor_hidden_dims: [-1] # hidden dimensions of predictor network
+    target_hidden_dims: [-1]  # hidden dimensions of target network
 
   # -- Symmetry Augmentation
   symmetry_cfg:
@@ -64,6 +64,11 @@ algorithm:
     # if 0, then no symmetry loss is used
     mirror_loss_coeff: 0.0
 
+  # -- Auxiliary MLP
+  auxiliary_cfg:
+    hidden_dims: [32, 32]
+    learning_rate: 0.001
+
 policy:
   class_name: ActorCritic
   # for MLP i.e. `ActorCritic`
@@ -79,21 +84,21 @@ policy:
   # rnn_num_layers: 1
 
 runner:
-    num_steps_per_env: 24  # number of steps per environment per iteration
-    max_iterations: 1500  # number of policy updates
-    empirical_normalization: false
-    # -- logging parameters
-    save_interval: 50  # check for potential saves every `save_interval` iterations
-    experiment_name: walking_experiment
-    run_name: ""
-    # -- logging writer
-    logger: tensorboard  # tensorboard, neptune, wandb
-    neptune_project: arc_kist
-    wandb_project: arc_kist
-    # -- load and resuming
-    load_run: -1  # -1 means load latest run
-    resume_path: null  # updated from load_run and checkpoint
-    checkpoint: -1  # -1 means load latest checkpoint
+  num_steps_per_env: 24  # number of steps per environment per iteration
+  max_iterations: 1500  # number of policy updates
+  empirical_normalization: false
+  # -- logging parameters
+  save_interval: 50  # check for potential saves every `save_interval` iterations
+  experiment_name: walking_experiment
+  run_name: ""
+  # -- logging writer
+  logger: tensorboard  # tensorboard, neptune, wandb
+  neptune_project: arc_kist
+  wandb_project: arc_kist
+  # -- load and resuming
+  load_run: -1  # -1 means load latest run
+  resume_path: null  # updated from load_run and checkpoint
+  checkpoint: -1  # -1 means load latest checkpoint
 
 runner_class_name: OnPolicyRunner
 seed: 1

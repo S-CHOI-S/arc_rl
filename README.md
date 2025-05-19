@@ -1,7 +1,7 @@
 # ARC RL
 
-> [!note]  
-> This project is based on [RSL-RL](https://github.com/leggedrobotics/rsl_rl), developed by Robotic Systems Lab, ETH Zurich and contributors.  
+> [!note]
+> This project is based on [RSL-RL](https://github.com/leggedrobotics/rsl_rl), developed by Robotic Systems Lab, ETH Zurich and contributors.
 
 **Maintainer**: Sol Choi <br/>
 **Affiliation**: Advanced Robot Control Lab, Korea Institute of Science and Technology (KIST) <br/>
@@ -25,4 +25,3 @@ The package supports the following logging frameworks which can be configured th
 * Neptune: https://docs.neptune.ai/
 
 For a demo configuration of PPO, please check the [dummy_config.yaml](config/dummy_config.yaml) file.
-
