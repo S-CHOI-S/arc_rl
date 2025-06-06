@@ -18,6 +18,7 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 
 from .rnd_cfg import ArcRlRndCfg
 from .symmetry_cfg import ArcRlSymmetryCfg
+from .auxiliary_cfg import ArcRlAuxiliaryCfg
 
 #########################
 # Policy configurations #
@@ -110,6 +111,9 @@ class ArcRlAppoAlgorithmCfg:
     """The configuration for the Random Network Distillation (RND) module. Default is None,
     in which case RND is not used.
     """
+
+    auxiliary_cfg: ArcRlAuxiliaryCfg | None = None
+    """The configuration for the auxiliary tasks. Default is None, in which case auxiliary tasks are not used."""
 
 
 #########################

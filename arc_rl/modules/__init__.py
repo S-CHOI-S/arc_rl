@@ -8,6 +8,7 @@
 from .actor_critic import ActorCritic
 from .actor_critic_recurrent import ActorCriticRecurrent
 from .aux_mlp import AuxiliaryMLP
+from .multihead import MultiheadMLP
 from .normalizer import EmpiricalNormalization
 from .rnd import RandomNetworkDistillation
 from .student_teacher import StudentTeacher
