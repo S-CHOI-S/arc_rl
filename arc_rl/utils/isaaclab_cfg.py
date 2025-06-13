@@ -19,6 +19,7 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 from .rnd_cfg import ArcRlRndCfg
 from .symmetry_cfg import ArcRlSymmetryCfg
 from .auxiliary_cfg import ArcRlAuxiliaryCfg
+from .constraint_cfg import ArcRlConstraintCfg
 
 #########################
 # Policy configurations #
@@ -55,8 +56,8 @@ class ArcRlPpoAlgorithmCfg(RslRlPpoAlgorithmCfg):
 class ArcRlAppoAlgorithmCfg:
     """Configuration for the APPO algorithm."""
 
-    class_name: str = "PPO"
-    """The algorithm class name. Default is PPO."""
+    class_name: str = "APPO"
+    """The algorithm class name. Default is APPO."""
 
     num_learning_epochs: int = MISSING
     """The number of learning epochs per update."""
@@ -113,6 +114,17 @@ class ArcRlAppoAlgorithmCfg:
     """
 
     auxiliary_cfg: ArcRlAuxiliaryCfg | None = None
+    """The configuration for the auxiliary tasks. Default is None, in which case auxiliary tasks are not used."""
+
+
+@configclass
+class ArcRlMipoAlgorithmCfg:
+    """Configuration for the APPO algorithm."""
+
+    class_name: str = "MIPO"
+    """The algorithm class name. Default is MIPO."""
+
+    constraint_cfg: ArcRlConstraintCfg | None = None
     """The configuration for the auxiliary tasks. Default is None, in which case auxiliary tasks are not used."""
 
 

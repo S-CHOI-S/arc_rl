@@ -9,6 +9,7 @@ from .isaaclab_cfg import *
 from .rnd_cfg import *
 from .symmetry_cfg import *
 from .auxiliary_cfg import *
+from .constraint_cfg import *
 from .utils import (
     resolve_nn_activation,
     split_and_pad_trajectories,
