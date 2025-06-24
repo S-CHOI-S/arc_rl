@@ -12,7 +12,7 @@ import torch
 from collections import deque
 
 import arc_rl
-from arc_rl.algorithms import APPO, PPO, Distillation
+from arc_rl.algorithms import PPO, Distillation, APPO, MIPO
 from arc_rl.env import VecEnv
 from arc_rl.modules import (
     ActorCritic,
@@ -102,7 +102,7 @@ class OnPolicyRunner:
 
         # initialize algorithm
         alg_class = eval(self.alg_cfg.pop("class_name"))
-        self.alg: PPO | Distillation | APPO = alg_class(
+        self.alg: PPO | Distillation | APPO | MIPO= alg_class(
             policy, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg
         )
 

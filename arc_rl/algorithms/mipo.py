@@ -44,7 +44,7 @@ class MIPO:
     def __init__(
         self,
         policy,
-        constraint_critic,
+        # constraint_critic,
         num_learning_epochs=1,
         num_mini_batches=1,
         clip_param=0.2,
@@ -58,7 +58,6 @@ class MIPO:
         use_clipped_value_loss=True,
         schedule="fixed",
         desired_kl=0.01,
-        thresholds: list[float] | None = None,
         # Auxiliary parameters
         auxiliary_cfg: nn.Module | None = None,
         auxiliary_lr: float = 1e-3,
@@ -127,17 +126,6 @@ class MIPO:
         self.storage: RolloutStorage = None  # type: ignore
         self.transition = RolloutStorage.Transition()
 
-        # Multihead components
-        self.constraint_critic = constraint_critic.to(self.device)
-        self.constraint_critic_optimizer = optim.Adam(
-            self.constraint_critic.parameters(),
-            lr=critic_learning_rate,  # same as critic learning rate
-        )
-        self.num_constraints = self.constraint_critic.output_dim
-        self.lambda_coeff = torch.ones(self.num_constraints, device=self.device)  # Lagrange multipliers
-        self.cost_limit = torch.tensor(thresholds, device=self.device)
-        self.lambda_lr = 0.01
-
         # MIPO parameters
         self.clip_param = clip_param
         self.num_learning_epochs = num_learning_epochs
@@ -172,6 +160,7 @@ class MIPO:
         actor_obs_shape,
         critic_obs_shape,
         actions_shape,
+        constraints_shape=None,
     ):
         # create memory for RND as well :)
         if self.rnd:
@@ -188,6 +177,7 @@ class MIPO:
             actions_shape,
             rnd_state_shape,
             self.device,
+            constraints_shape,
         )
 
     def act(self, obs, critic_obs):
@@ -228,6 +218,12 @@ class MIPO:
                 self.transition.values * infos["time_outs"].unsqueeze(1).to(self.device),
                 1,
             )
+
+        if "cost" in infos:
+            # infos["cost"]: Tensor of shape (num_envs, cost_dim)
+            self.transition.costs = infos["costs"].clone()
+        else:
+            self.transition.costs = torch.zeros(rewards.shape[0], 1, device=self.device)
 
         # record the transition
         self.storage.add_transitions(self.transition)
@@ -280,9 +276,6 @@ class MIPO:
             masks_batch,
             rnd_state_batch,
             costs_batch,
-            cost_values_batch,
-            cost_advantages_batch,
-            cost_returns_batch,
         ) in generator:
 
             # number of augmentations per sample
@@ -335,10 +328,6 @@ class MIPO:
             mu_batch = self.policy.action_mean[:original_batch_size]
             sigma_batch = self.policy.action_std[:original_batch_size]
             entropy_batch = self.policy.entropy[:original_batch_size]
-
-            # constraint critic
-            predicted_constraint_values = self.constraint_critic(critic_obs_batch)  # shape: [B, K]
-            constraint_critic_loss = nn.functional.mse_loss(predicted_constraint_values, cost_returns_batch)
 
             # KL
             if self.desired_kl is not None and self.schedule == "adaptive":
@@ -397,9 +386,6 @@ class MIPO:
                 value_loss = (returns_batch - value_batch).pow(2).mean()
 
             # loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
-
-            # Constraint loss (penalty: λᵗ * cost_advantage)
-            constraint_loss = (self.lambda_coeff * cost_advantages_batch.mean(dim=0)).sum()
 
             # Symmetry loss
             if self.symmetry:
@@ -466,18 +452,13 @@ class MIPO:
             # -- For MIPO
             # ----- Actor update -----
             self.actor_optimizer.zero_grad()
-            actor_loss = surrogate_loss + constraint_loss - self.entropy_coef * entropy_batch.mean()
+            actor_loss = surrogate_loss - self.entropy_coef * entropy_batch.mean()
             actor_loss.backward()
 
             # ----- Critic update -----
             self.critic_optimizer.zero_grad()
             critic_loss = self.value_loss_coef * value_loss  # no entropy in critic
             critic_loss.backward()
-
-            # ----- Constraint critic update -----
-            self.constraint_critic_optimizer.zero_grad()
-            constraint_critic_loss.backward()
-
             # -- For RND
             if self.rnd:
                 self.rnd_optimizer.zero_grad()  # type: ignore
@@ -495,14 +476,6 @@ class MIPO:
             # ----- Critic update -----
             nn.utils.clip_grad_norm_(self.policy.critic.parameters(), self.max_grad_norm)
             self.critic_optimizer.step()
-            # ----- Constraint critic update -----
-            nn.utils.clip_grad_norm_(self.constraint_critic.parameters(), self.max_grad_norm)
-            self.constraint_critic_optimizer.step()
-            # ----- Lagrangian multiplier (λ) update -----
-            constraint_violation = cost_returns_batch.mean(dim=0) - self.cost_limit  # self.cost_limit: [K]-dim tensor
-            self.lambda_coeff += self.lambda_lr * constraint_violation
-            self.lambda_coeff = torch.clamp(self.lambda_coeff, min=0.0)
-
             # -- For RND
             if self.rnd_optimizer:
                 self.rnd_optimizer.step()
@@ -511,7 +484,6 @@ class MIPO:
             mean_value_loss += value_loss.item()
             mean_surrogate_loss += surrogate_loss.item()
             mean_entropy += entropy_batch.mean().item()
-            mean_constraint_loss = constraint_loss.item()
             # -- RND loss
             if mean_rnd_loss is not None:
                 mean_rnd_loss += rnd_loss.item()
@@ -524,7 +496,6 @@ class MIPO:
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
         mean_entropy /= num_updates
-        mean_constraint_loss /= num_updates
         # -- For RND
         if mean_rnd_loss is not None:
             mean_rnd_loss /= num_updates
@@ -539,8 +510,6 @@ class MIPO:
             "value_function": mean_value_loss,
             "surrogate": mean_surrogate_loss,
             "entropy": mean_entropy,
-            "constraint": mean_constraint_loss,
-            "lambda_coeff": self.lambda_coeff.detach().cpu().numpy().tolist(),
         }
         if self.rnd:
             loss_dict["rnd"] = mean_rnd_loss
