@@ -38,7 +38,7 @@ class OnPolicyRunner:
         self._configure_multi_gpu()
 
         # resolve training type depending on the algorithm
-        if self.alg_cfg["class_name"] == "PPO" or "APPO":
+        if self.alg_cfg["class_name"] == "PPO" or "APPO" or "MIPO":
             self.training_type = "rl"
         elif self.alg_cfg["class_name"] == "Distillation":
             self.training_type = "distillation"
@@ -106,6 +106,11 @@ class OnPolicyRunner:
             policy, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg
         )
 
+        if isinstance(self.alg, MIPO):
+            self.is_constrained = True
+        else:
+            self.is_constrained = False
+
         # store training configuration
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
@@ -127,6 +132,7 @@ class OnPolicyRunner:
             [num_obs],
             [num_privileged_obs],
             [self.env.num_actions],
+            constraints_shape = [3] if self.is_constrained else None,
         )
 
         # Decide whether to disable logging
@@ -212,9 +218,16 @@ class OnPolicyRunner:
                     # Sample actions
                     actions = self.alg.act(obs, privileged_obs)
                     # Step the environment
-                    obs, rewards, dones, infos = self.env.step(actions.to(self.env.device))
+                    obs, rewards, dones, infos = self.env.step(actions.to(self.env.device), self.is_constrained)
+                    # print(f"costs: {infos.get('costs', None)}")  # Log costs if available
+
                     # Move to device
                     obs, rewards, dones = (obs.to(self.device), rewards.to(self.device), dones.to(self.device))
+                    if self.is_constrained:
+                        costs = infos.get("costs", None)
+                        if costs is not None:
+                            costs = costs.to(self.device)
+
                     # perform normalization
                     obs = self.obs_normalizer(obs)
                     if self.privileged_obs_type is not None:
@@ -225,7 +238,7 @@ class OnPolicyRunner:
                         privileged_obs = obs
 
                     # process the step
-                    self.alg.process_env_step(rewards, dones, infos)
+                    self.alg.process_env_step(rewards, dones, infos, costs if self.is_constrained else None)
 
                     # Extract intrinsic rewards (only for logging)
                     intrinsic_rewards = self.alg.intrinsic_rewards if self.alg.rnd else None
@@ -266,6 +279,8 @@ class OnPolicyRunner:
                 # compute returns
                 if self.training_type == "rl":
                     self.alg.compute_returns(privileged_obs)
+                    if self.is_constrained:
+                        self.alg.compute_cost_returns(privileged_obs)
 
             # update policy
             loss_dict = self.alg.update()

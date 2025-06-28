@@ -37,6 +37,10 @@ class ActorCritic(nn.Module):
 
         mlp_input_dim_a = num_actor_obs
         mlp_input_dim_c = num_critic_obs
+
+        self.actor_obs_dim = num_actor_obs
+        self.critic_obs_dim = num_critic_obs
+
         # Policy
         actor_layers = []
         actor_layers.append(nn.Linear(mlp_input_dim_a, actor_hidden_dims[0]))

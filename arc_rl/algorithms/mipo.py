@@ -125,6 +125,12 @@ class MIPO:
         # Create rollout storage
         self.storage: RolloutStorage = None  # type: ignore
         self.transition = RolloutStorage.Transition()
+        # Create constraint critic
+        self.constraint_critic = MultiheadMLP(
+            input_dim=self.policy.critic_obs_dim,
+            # output_dim=self.num_constraints,
+            # hidden_dims=self.policy.constraint_critic_hidden_dims,
+        )
 
         # MIPO parameters
         self.clip_param = clip_param
@@ -192,9 +198,13 @@ class MIPO:
         # need to record obs and critic_obs before env.step()
         self.transition.observations = obs
         self.transition.privileged_observations = critic_obs
+
+        # compute the cost values
+        if self.constraint_critic is not None:
+            self.transition.cost_values = self.constraint_critic(critic_obs).detach()
         return self.transition.actions
 
-    def process_env_step(self, rewards, dones, infos):
+    def process_env_step(self, rewards, dones, infos, costs=None):
         # Record the rewards and dones
         # Note: we clone here because later on we bootstrap the rewards based on timeouts
         self.transition.rewards = rewards.clone()
@@ -219,10 +229,11 @@ class MIPO:
                 1,
             )
 
-        if "cost" in infos:
-            # infos["cost"]: Tensor of shape (num_envs, cost_dim)
-            self.transition.costs = infos["costs"].clone()
+        if costs is not None:
+            # costs: Tensor of shape (num_envs, cost_dim)
+            self.transition.costs = costs.clone()
         else:
+            # if costs are not provided, we assume no costs
             self.transition.costs = torch.zeros(rewards.shape[0], 1, device=self.device)
 
         # record the transition
@@ -238,6 +249,16 @@ class MIPO:
             self.gamma,
             self.lam,
             normalize_advantage=not self.normalize_advantage_per_mini_batch,
+        )
+
+    def compute_cost_returns(self, last_critic_obs):
+        """Compute the cost returns for the constraints."""
+        # compute cost returns
+        last_cost_values = self.constraint_critic(last_critic_obs).detach()
+        self.storage.compute_cost_returns(
+            last_cost_values,
+            self.gamma,
+            self.lam,
         )
 
     def update(self):  # noqa: C901
@@ -275,7 +296,10 @@ class MIPO:
             hid_states_batch,
             masks_batch,
             rnd_state_batch,
-            costs_batch,
+            # for constraints
+            target_cost_values_batch,
+            cost_returns_batch,
+            cost_advantages_batch,
         ) in generator:
 
             # number of augmentations per sample

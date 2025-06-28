@@ -27,6 +27,7 @@ class RolloutStorage:
             self.rnd_state = None
             # for constraints
             self.costs = None
+            self.cost_values = None
 
         def clear(self):
             self.__init__()
@@ -78,6 +79,13 @@ class RolloutStorage:
             self.sigma = torch.zeros(num_transitions_per_env, num_envs, *actions_shape, device=self.device)
             self.returns = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
             self.advantages = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
+            
+            # for constraints
+            if constraints_shape is not None:
+                self.costs = torch.zeros(num_transitions_per_env, num_envs, *constraints_shape, device=self.device)
+                self.cost_values = torch.zeros(num_transitions_per_env, num_envs, *constraints_shape, device=self.device)
+                self.cost_returns = torch.zeros(num_transitions_per_env, num_envs, *constraints_shape, device=self.device)
+                self.cost_advantages = torch.zeros(num_transitions_per_env, num_envs, *constraints_shape, device=self.device)
 
         # For RND
         if rnd_state_shape is not None:
@@ -86,10 +94,6 @@ class RolloutStorage:
         # For RNN networks
         self.saved_hidden_states_a = None
         self.saved_hidden_states_c = None
-
-        # for constraints
-        if constraints_shape is not None:
-            self.costs = torch.zeros(num_transitions_per_env, num_envs, *constraints_shape, device=self.device)
 
         # counter for the number of transitions stored
         self.step = 0
@@ -118,15 +122,14 @@ class RolloutStorage:
             self.mu[self.step].copy_(transition.action_mean)
             self.sigma[self.step].copy_(transition.action_sigma)
 
+            # for constraints
+            if self.constraints_shape is not None:
+                self.costs[self.step].copy_(transition.costs)
+                self.cost_values[self.step].copy_(transition.cost_values)
+
         # For RND
         if self.rnd_state_shape is not None:
             self.rnd_state[self.step].copy_(transition.rnd_state)
-
-        # for constraints
-        if self.constraints_shape is not None:
-            if not hasattr(self, "costs") or self.costs is None:
-                raise AttributeError("RolloutStorage has no .costs buffer defined. Please initialize self.costs in __init__().")
-            self.costs[self.step].copy_(transition.costs)
 
         # For RNN networks
         self._save_hidden_states(transition.hidden_states)
@@ -180,29 +183,27 @@ class RolloutStorage:
         if normalize_advantage:
             self.advantages = (self.advantages - self.advantages.mean()) / (self.advantages.std() + 1e-8)
 
-    # def compute_cost_returns(self, last_values, gamma, lam, normalize_advantage: bool = False):
-    #     cost_advantage = 0
-    #     for step in reversed(range(self.num_transitions_per_env)):
-    #         # if we are at the last step, bootstrap the return value
-    #         if step == self.num_transitions_per_env - 1:
-    #             next_values = last_values
-    #         else:
-    #             next_values = self.values[step + 1]
-    #         # 1 if we are not in a terminal state, 0 otherwise
-    #         next_is_not_terminal = 1.0 - self.dones[step].float()
-    #         # TD error: r_t + gamma * V(s_{t+1}) - V(s_t)
-    #         delta = self.rewards[step] + next_is_not_terminal * gamma * next_values - self.values[step]
-    #         # Cost Advantage: A(s_t, a_t) = delta_t + gamma * lambda * A(s_{t+1}, a_{t+1})
-    #         cost_advantage = delta + next_is_not_terminal * gamma * lam * cost_advantage
-    #         # Return: R_t = A(s_t, a_t) + V(s_t)
-    #         self.returns[step] = cost_advantage + self.values[step]
+    # for constraints
+    def compute_cost_returns(self, last_values, gamma, lam):
+        cost_advantage = 0
+        for step in reversed(range(self.num_transitions_per_env)):
+            # if we are at the last step, bootstrap the return value
+            if step == self.num_transitions_per_env - 1:
+                next_values = last_values
+            else:
+                next_values = self.cost_values[step + 1]
 
-    #     # Compute the advantages
-    #     self.advantages = self.returns - self.values
-    #     # Normalize the advantages if flag is set
-    #     # This is to prevent double normalization (i.e. if per minibatch normalization is used)
-    #     if normalize_advantage:
-    #         self.advantages = (self.advantages - self.advantages.mean()) / (self.advantages.std() + 1e-8)
+            # 1 if we are not in a terminal state, 0 otherwise
+            next_is_not_terminal = 1.0 - self.dones[step].float()
+            # TD error: r_t + gamma * V(s_{t+1}) - V(s_t)
+            delta = self.costs[step] + next_is_not_terminal * gamma * next_values - self.cost_values[step]
+            # Cost Advantage: A(s_t, a_t) = delta_t + gamma * lambda * A(s_{t+1}, a_{t+1})
+            cost_advantage = delta + next_is_not_terminal * gamma * lam * cost_advantage
+            # Return: R_t = A(s_t, a_t) + V(s_t)
+            self.cost_returns[step] = cost_advantage + self.cost_values[step]
+
+        # Compute the advantages
+        self.cost_advantages = self.cost_returns - self.cost_values
 
     # for distillation
     def generator(self):
@@ -249,7 +250,9 @@ class RolloutStorage:
 
         # For Constraints
         if self.constraints_shape is not None:
-            costs = self.costs.flatten(0, 1)
+            cost_values = self.cost_values.flatten(0, 1)
+            cost_returns = self.cost_returns.flatten(0, 1)
+            cost_advantages = self.cost_advantages.flatten(0, 1)
 
         for epoch in range(num_epochs):
             for i in range(num_mini_batches):
@@ -280,15 +283,19 @@ class RolloutStorage:
 
                 # -- For Constraints
                 if self.constraints_shape is not None:
-                    costs_batch = costs[batch_idx]
+                    target_cost_values_batch = cost_values[batch_idx]
+                    cost_returns_batch = cost_returns[batch_idx]
+                    cost_advantages_batch = cost_advantages[batch_idx]
                 else:
-                    costs_batch = None
+                    target_cost_values_batch = None
+                    cost_returns_batch = None
+                    cost_advantages_batch = None
 
                 # yield the mini-batch
                 yield obs_batch, privileged_observations_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (
                     None,
                     None,
-                ), None, rnd_state_batch, costs_batch
+                ), None, rnd_state_batch, target_cost_values_batch, cost_returns_batch, cost_advantages_batch
 
     # for reinfrocement learning with recurrent networks
     def recurrent_mini_batch_generator(self, num_mini_batches, num_epochs=8):
@@ -304,11 +311,6 @@ class RolloutStorage:
             padded_rnd_state_trajectories, _ = split_and_pad_trajectories(self.rnd_state, self.dones)
         else:
             padded_rnd_state_trajectories = None
-
-        if self.constraints_shape is not None:
-            padded_constraints_trajectories, _ = split_and_pad_trajectories(self.costs, self.dones)
-        else:
-            padded_constraints_trajectories = None
 
         mini_batch_size = self.num_envs // num_mini_batches
         for ep in range(num_epochs):
@@ -333,11 +335,6 @@ class RolloutStorage:
                 else:
                     rnd_state_batch = None
 
-                if padded_constraints_trajectories is not None:
-                    constraints_batch = padded_constraints_trajectories[:, first_traj:last_traj]
-                else:
-                    constraints_batch = None
-
                 actions_batch = self.actions[:, start:stop]
                 old_mu_batch = self.mu[:, start:stop]
                 old_sigma_batch = self.sigma[:, start:stop]
@@ -345,6 +342,12 @@ class RolloutStorage:
                 advantages_batch = self.advantages[:, start:stop]
                 values_batch = self.values[:, start:stop]
                 old_actions_log_prob_batch = self.actions_log_prob[:, start:stop]
+
+                # for constraints
+                if self.constraints_shape is not None:
+                    cost_values_batch = self.cost_values[:, start:stop]
+                    cost_returns_batch = self.cost_returns[:, start:stop]
+                    cost_advantages_batch = self.cost_advantages[:, start:stop]
 
                 # reshape to [num_envs, time, num layers, hidden dim] (original shape: [time, num_layers, num_envs, hidden_dim])
                 # then take only time steps after dones (flattens num envs and time dimensions),
@@ -369,6 +372,6 @@ class RolloutStorage:
                 yield obs_batch, privileged_obs_batch, actions_batch, values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (
                     hid_a_batch,
                     hid_c_batch,
-                ), masks_batch, rnd_state_batch, constraints_batch
+                ), masks_batch, rnd_state_batch, cost_values_batch, cost_advantages_batch, cost_returns_batch,
 
                 first_traj = last_traj
