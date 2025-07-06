@@ -38,8 +38,6 @@ class MIPO:
 
     policy: ActorCritic
     """The actor critic module."""
-    constraint_critic: MultiheadMLP
-    """The multihead critic module for constraints."""
 
     def __init__(
         self,
@@ -69,6 +67,10 @@ class MIPO:
         symmetry_cfg: dict | None = None,
         # Distributed training parameters
         multi_gpu_cfg: dict | None = None,
+        # Constraint critic parameters
+        constraint_value_loss_coef=1.0,
+        temperature=20.0,
+        constraint_limit_alpha=0.1,
     ):
         # device-related parameters
         self.device = device
@@ -131,6 +133,11 @@ class MIPO:
             # output_dim=self.num_constraints,
             # hidden_dims=self.policy.constraint_critic_hidden_dims,
         )
+        self.constraint_critic.to(self.device)
+        self.constraint_critic_optimizer = optim.Adam(
+            self.constraint_critic.parameters(),
+            lr=critic_learning_rate,
+        ) # constraint critic optimizer
 
         # MIPO parameters
         self.clip_param = clip_param
@@ -147,6 +154,11 @@ class MIPO:
         self.actor_learning_rate = actor_learning_rate
         self.critic_learning_rate = critic_learning_rate
         self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
+        self.constraint_value_loss_coef = constraint_value_loss_coef
+        self.temperature = temperature
+        self.constraint_limit_alpha = constraint_limit_alpha
+        self.initial_constraint_limits = None
+        self.num_constraints = 0
 
         # Auxiliary parameters
         if auxiliary_cfg is not None:
@@ -173,6 +185,10 @@ class MIPO:
             rnd_state_shape = [self.rnd.num_states]
         else:
             rnd_state_shape = None
+
+        if self.constraint_critic is not None:
+            self.adaptive_constraint_limit = self.initial_constraint_limits
+
         # create rollout storage
         self.storage = RolloutStorage(
             training_type,
@@ -185,6 +201,7 @@ class MIPO:
             self.device,
             constraints_shape,
         )
+        # print(f"MIPO//Using MIPO with {self.num_constraints} constraints, initial limits: {self.initial_constraint_limits}")
 
     def act(self, obs, critic_obs):
         if self.policy.is_recurrent:
@@ -275,6 +292,25 @@ class MIPO:
             mean_symmetry_loss = 0
         else:
             mean_symmetry_loss = None
+        # -- Constraint critic loss
+        if self.constraint_critic is not None:
+            mean_constraint_value_loss = 0
+            with torch.no_grad():
+                all_critic_obs = self.storage.privileged_observations  # shape: (T, num_envs, obs_dim)
+                all_cost_values = self.constraint_critic(all_critic_obs)  # shape: (T, num_envs, num_constraints)
+
+                # reshape to flat batch: (T * num_envs, num_constraints)
+                all_cost_values = all_cost_values.view(-1, all_cost_values.shape[-1])
+                mean_cost_values = all_cost_values.mean(dim=0)  # shape: (num_constraints,)
+
+                initial = self.initial_constraint_limits.to(self.device).view(-1)
+                self.adaptive_constraint_limit = torch.maximum(
+                    initial,
+                    mean_cost_values + self.constraint_limit_alpha * initial
+                )
+                print("Adaptive constraint limits:", self.adaptive_constraint_limit, self.adaptive_constraint_limit.shape)
+        else:
+            mean_constraint_value_loss = None
 
         # generator for mini batches
         if self.policy.is_recurrent:
@@ -339,6 +375,12 @@ class MIPO:
                 target_values_batch = target_values_batch.repeat(num_aug, 1)
                 advantages_batch = advantages_batch.repeat(num_aug, 1)
                 returns_batch = returns_batch.repeat(num_aug, 1)
+                if self.constraint_critic is not None:
+                    # -- constraints
+                    target_cost_values_batch = target_cost_values_batch.repeat(num_aug, 1, 1)
+                    cost_returns_batch = cost_returns_batch.repeat(num_aug, 1, 1)
+                    cost_advantages_batch = cost_advantages_batch.repeat(num_aug, 1, 1)
+
 
             # Recompute actions log prob and entropy for current batch of transitions
             # Note: we need to do this because we updated the policy with the new parameters
@@ -352,6 +394,10 @@ class MIPO:
             mu_batch = self.policy.action_mean[:original_batch_size]
             sigma_batch = self.policy.action_std[:original_batch_size]
             entropy_batch = self.policy.entropy[:original_batch_size]
+            # -- constraints
+            if self.constraint_critic is not None:
+                # compute the cost values
+                cost_values_batch = self.constraint_critic(critic_obs_batch, masks=masks_batch)
 
             # KL
             if self.desired_kl is not None and self.schedule == "adaptive":
@@ -410,6 +456,22 @@ class MIPO:
                 value_loss = (returns_batch - value_batch).pow(2).mean()
 
             # loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
+
+            # Constraint critic loss
+            if self.constraint_critic is not None:
+                constraint_value_loss = (cost_values_batch - cost_returns_batch).pow(2).mean() # type: ignore
+
+                # cost_values_batch: shape (batch_size, num_constraints)
+                # adaptive_constraint_limit: shape (num_constraints,) or list of scalars
+                diff = torch.clamp(self.adaptive_constraint_limit - cost_values_batch.detach(), min=1e-6) # type: ignore
+
+                # Compute the log barrier
+                mask = (cost_advantages_batch > 0).float() # type: ignore
+
+                barrier = -torch.log(diff) / self.temperature  # shape: (batch_size, num_constraints)
+                masked_barrier = barrier * mask
+
+                constraint_barrier_loss = masked_barrier.mean()
 
             # Symmetry loss
             if self.symmetry:
@@ -477,6 +539,8 @@ class MIPO:
             # ----- Actor update -----
             self.actor_optimizer.zero_grad()
             actor_loss = surrogate_loss - self.entropy_coef * entropy_batch.mean()
+            if self.constraint_critic is not None:
+                actor_loss += constraint_barrier_loss
             actor_loss.backward()
 
             # ----- Critic update -----
@@ -487,6 +551,12 @@ class MIPO:
             if self.rnd:
                 self.rnd_optimizer.zero_grad()  # type: ignore
                 rnd_loss.backward()
+
+            # -- For Constraints
+            if self.constraint_critic is not None:
+                self.constraint_critic_optimizer.zero_grad()
+                constraint_value_loss = self.constraint_value_loss_coef * constraint_value_loss
+                constraint_value_loss.backward() # type: ignore
 
             # Collect gradients from all GPUs
             if self.is_multi_gpu:
@@ -503,6 +573,10 @@ class MIPO:
             # -- For RND
             if self.rnd_optimizer:
                 self.rnd_optimizer.step()
+            # -- For Constraints
+            if self.constraint_critic_optimizer:
+                nn.utils.clip_grad_norm_(self.constraint_critic.parameters(), self.max_grad_norm)
+                self.constraint_critic_optimizer.step()
 
             # Store the losses
             mean_value_loss += value_loss.item()
@@ -514,6 +588,9 @@ class MIPO:
             # -- Symmetry loss
             if mean_symmetry_loss is not None:
                 mean_symmetry_loss += symmetry_loss.item()
+            # -- Constraint critic loss
+            if mean_constraint_value_loss is not None:
+                mean_constraint_value_loss += constraint_value_loss.detach().item()
 
         # -- For MIPO
         num_updates = self.num_learning_epochs * self.num_mini_batches
@@ -526,6 +603,9 @@ class MIPO:
         # -- For Symmetry
         if mean_symmetry_loss is not None:
             mean_symmetry_loss /= num_updates
+        # -- For Constraints
+        if self.constraint_critic is not None:
+            mean_constraint_value_loss /= num_updates
         # -- Clear the storage
         self.storage.clear()
 
@@ -541,6 +621,8 @@ class MIPO:
             loss_dict["symmetry"] = mean_symmetry_loss
         if self.auxiliary:
             loss_dict["auxiliary"] = auxiliary_loss.item()
+        if self.constraint_critic is not None:
+            loss_dict["constraint_value_loss"] = mean_constraint_value_loss
 
         return loss_dict
 

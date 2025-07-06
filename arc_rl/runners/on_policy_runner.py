@@ -108,6 +108,12 @@ class OnPolicyRunner:
 
         if isinstance(self.alg, MIPO):
             self.is_constrained = True
+            self.initial_constraint_limits = env.constraint_thresholds # type: ignore
+            self.num_constraints=len(self.initial_constraint_limits)
+
+            self.alg.initial_constraint_limits = torch.tensor(self.initial_constraint_limits, dtype=torch.float32, device=self.device)
+            self.alg.num_constraints = self.num_constraints
+            print(f"Using MIPO with {self.num_constraints} constraints, initial limits: {self.initial_constraint_limits}")
         else:
             self.is_constrained = False
 
