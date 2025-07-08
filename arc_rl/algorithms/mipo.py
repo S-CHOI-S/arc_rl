@@ -68,6 +68,8 @@ class MIPO:
         # Distributed training parameters
         multi_gpu_cfg: dict | None = None,
         # Constraint critic parameters
+        num_constraints=0,
+        initial_constraint_limits=None,
         constraint_value_loss_coef=1.0,
         temperature=20.0,
         constraint_limit_alpha=0.1,
@@ -127,10 +129,17 @@ class MIPO:
         # Create rollout storage
         self.storage: RolloutStorage = None  # type: ignore
         self.transition = RolloutStorage.Transition()
+        self.num_constraints = num_constraints
+        self.initial_constraint_limits = (
+            torch.tensor(initial_constraint_limits, dtype=torch.float32, device=device)
+            if initial_constraint_limits is not None
+            else torch.zeros(num_constraints, dtype=torch.float32, device=device)
+        )
+        self.adaptive_constraint_limit = self.initial_constraint_limits
         # Create constraint critic
         self.constraint_critic = MultiheadMLP(
             input_dim=self.policy.critic_obs_dim,
-            # output_dim=self.num_constraints,
+            output_dim=self.num_constraints,
             # hidden_dims=self.policy.constraint_critic_hidden_dims,
         )
         self.constraint_critic.to(self.device)
@@ -157,8 +166,6 @@ class MIPO:
         self.constraint_value_loss_coef = constraint_value_loss_coef
         self.temperature = temperature
         self.constraint_limit_alpha = constraint_limit_alpha
-        self.initial_constraint_limits = None
-        self.num_constraints = 0
 
         # Auxiliary parameters
         if auxiliary_cfg is not None:
@@ -186,9 +193,6 @@ class MIPO:
         else:
             rnd_state_shape = None
 
-        if self.constraint_critic is not None:
-            self.adaptive_constraint_limit = self.initial_constraint_limits
-
         # create rollout storage
         self.storage = RolloutStorage(
             training_type,
@@ -201,7 +205,6 @@ class MIPO:
             self.device,
             constraints_shape,
         )
-        # print(f"MIPO//Using MIPO with {self.num_constraints} constraints, initial limits: {self.initial_constraint_limits}")
 
     def act(self, obs, critic_obs):
         if self.policy.is_recurrent:

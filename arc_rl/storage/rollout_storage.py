@@ -295,7 +295,7 @@ class RolloutStorage:
                 yield obs_batch, privileged_observations_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (
                     None,
                     None,
-                ), None, rnd_state_batch, target_cost_values_batch, cost_returns_batch, cost_advantages_batch
+                ), None, rnd_state_batch, target_cost_values_batch, cost_returns_batch, cost_advantages_batch  # MIPO
 
     # for reinfrocement learning with recurrent networks
     def recurrent_mini_batch_generator(self, num_mini_batches, num_epochs=8):

@@ -100,23 +100,6 @@ class OnPolicyRunner:
             )
             self.alg_cfg["auxiliary_cfg"] = auxiliary_model
 
-        # initialize algorithm
-        alg_class = eval(self.alg_cfg.pop("class_name"))
-        self.alg: PPO | Distillation | APPO | MIPO= alg_class(
-            policy, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg
-        )
-
-        if isinstance(self.alg, MIPO):
-            self.is_constrained = True
-            self.initial_constraint_limits = env.constraint_thresholds # type: ignore
-            self.num_constraints=len(self.initial_constraint_limits)
-
-            self.alg.initial_constraint_limits = torch.tensor(self.initial_constraint_limits, dtype=torch.float32, device=self.device)
-            self.alg.num_constraints = self.num_constraints
-            print(f"Using MIPO with {self.num_constraints} constraints, initial limits: {self.initial_constraint_limits}")
-        else:
-            self.is_constrained = False
-
         # store training configuration
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
@@ -130,16 +113,51 @@ class OnPolicyRunner:
             self.obs_normalizer = torch.nn.Identity().to(self.device)  # no normalization
             self.privileged_obs_normalizer = torch.nn.Identity().to(self.device)  # no normalization
 
-        # init storage and model
-        self.alg.init_storage(
-            self.training_type,
-            self.env.num_envs,
-            self.num_steps_per_env,
-            [num_obs],
-            [num_privileged_obs],
-            [self.env.num_actions],
-            constraints_shape = [3] if self.is_constrained else None,
-        )
+        # initialize algorithm
+        alg_class = eval(self.alg_cfg.pop("class_name"))
+        if alg_class is MIPO:
+            self.is_constrained = True
+            self.initial_constraint_limits = env.constraint_thresholds # type: ignore
+            self.num_constraints = len(self.initial_constraint_limits)
+
+            self.alg = alg_class(
+                policy,
+                device=self.device,
+                num_constraints=self.num_constraints,
+                initial_constraint_limits=self.initial_constraint_limits,
+                **self.alg_cfg,
+                multi_gpu_cfg=self.multi_gpu_cfg,
+            )
+
+            # init storage and model
+            self.alg.init_storage(
+                self.training_type,
+                self.env.num_envs,
+                self.num_steps_per_env,
+                [num_obs],
+                [num_privileged_obs],
+                [self.env.num_actions],
+                constraints_shape = [self.num_constraints] if self.is_constrained else None,
+            )
+            # print(f"Using MIPO with {self.num_constraints} constraints, initial limits: {self.initial_constraint_limits}")
+        else:
+            self.is_constrained = False
+            self.alg = alg_class(
+                policy,
+                device=self.device,
+                **self.alg_cfg,
+                multi_gpu_cfg=self.multi_gpu_cfg,
+            )
+
+            # init storage and model
+            self.alg.init_storage(
+                self.training_type,
+                self.env.num_envs,
+                self.num_steps_per_env,
+                [num_obs],
+                [num_privileged_obs],
+                [self.env.num_actions],
+            )
 
         # Decide whether to disable logging
         # We only log from the process with rank 0 (main process)
@@ -356,7 +374,7 @@ class OnPolicyRunner:
             self.writer.add_scalar(f"Loss/{key}", value, locs["it"])
         if hasattr(self.alg, "learning_rate"):
             self.writer.add_scalar("Loss/learning_rate", self.alg.learning_rate, locs["it"])
-        elif isinstance(self.alg, APPO):
+        elif isinstance(self.alg, APPO | MIPO):
             self.writer.add_scalar("Loss/actor_learning_rate", self.alg.actor_learning_rate, locs["it"])
             self.writer.add_scalar("Loss/critic_learning_rate", self.alg.critic_learning_rate, locs["it"])
 
