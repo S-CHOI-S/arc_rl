@@ -25,9 +25,6 @@ class RolloutStorage:
             self.action_sigma = None
             self.hidden_states = None
             self.rnd_state = None
-            # for constraints
-            self.costs = None
-            self.cost_values = None
 
         def clear(self):
             self.__init__()
@@ -42,7 +39,6 @@ class RolloutStorage:
         actions_shape,
         rnd_state_shape=None,
         device="cpu",
-        constraints_shape=None,
     ):
         # store inputs
         self.training_type = training_type
@@ -53,7 +49,6 @@ class RolloutStorage:
         self.privileged_obs_shape = privileged_obs_shape
         self.rnd_state_shape = rnd_state_shape
         self.actions_shape = actions_shape
-        self.constraints_shape = constraints_shape
 
         # Core
         self.observations = torch.zeros(num_transitions_per_env, num_envs, *obs_shape, device=self.device)
@@ -79,13 +74,6 @@ class RolloutStorage:
             self.sigma = torch.zeros(num_transitions_per_env, num_envs, *actions_shape, device=self.device)
             self.returns = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
             self.advantages = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
-            
-            # for constraints
-            if constraints_shape is not None:
-                self.costs = torch.zeros(num_transitions_per_env, num_envs, *constraints_shape, device=self.device)
-                self.cost_values = torch.zeros(num_transitions_per_env, num_envs, *constraints_shape, device=self.device)
-                self.cost_returns = torch.zeros(num_transitions_per_env, num_envs, *constraints_shape, device=self.device)
-                self.cost_advantages = torch.zeros(num_transitions_per_env, num_envs, *constraints_shape, device=self.device)
 
         # For RND
         if rnd_state_shape is not None:
@@ -121,11 +109,6 @@ class RolloutStorage:
             self.actions_log_prob[self.step].copy_(transition.actions_log_prob.view(-1, 1))
             self.mu[self.step].copy_(transition.action_mean)
             self.sigma[self.step].copy_(transition.action_sigma)
-
-            # for constraints
-            if self.constraints_shape is not None:
-                self.costs[self.step].copy_(transition.costs)
-                self.cost_values[self.step].copy_(transition.cost_values)
 
         # For RND
         if self.rnd_state_shape is not None:
@@ -183,28 +166,6 @@ class RolloutStorage:
         if normalize_advantage:
             self.advantages = (self.advantages - self.advantages.mean()) / (self.advantages.std() + 1e-8)
 
-    # for constraints
-    def compute_cost_returns(self, last_values, gamma, lam):
-        cost_advantage = 0
-        for step in reversed(range(self.num_transitions_per_env)):
-            # if we are at the last step, bootstrap the return value
-            if step == self.num_transitions_per_env - 1:
-                next_values = last_values
-            else:
-                next_values = self.cost_values[step + 1]
-
-            # 1 if we are not in a terminal state, 0 otherwise
-            next_is_not_terminal = 1.0 - self.dones[step].float()
-            # TD error: r_t + gamma * V(s_{t+1}) - V(s_t)
-            delta = self.costs[step] + next_is_not_terminal * gamma * next_values - self.cost_values[step]
-            # Cost Advantage: A(s_t, a_t) = delta_t + gamma * lambda * A(s_{t+1}, a_{t+1})
-            cost_advantage = delta + next_is_not_terminal * gamma * lam * cost_advantage
-            # Return: R_t = A(s_t, a_t) + V(s_t)
-            self.cost_returns[step] = cost_advantage + self.cost_values[step]
-
-        # Compute the advantages
-        self.cost_advantages = self.cost_returns - self.cost_values
-
     # for distillation
     def generator(self):
         if self.training_type != "distillation":
@@ -248,12 +209,6 @@ class RolloutStorage:
         if self.rnd_state_shape is not None:
             rnd_state = self.rnd_state.flatten(0, 1)
 
-        # For Constraints
-        if self.constraints_shape is not None:
-            cost_values = self.cost_values.flatten(0, 1)
-            cost_returns = self.cost_returns.flatten(0, 1)
-            cost_advantages = self.cost_advantages.flatten(0, 1)
-
         for epoch in range(num_epochs):
             for i in range(num_mini_batches):
                 # Select the indices for the mini-batch
@@ -281,21 +236,11 @@ class RolloutStorage:
                 else:
                     rnd_state_batch = None
 
-                # -- For Constraints
-                if self.constraints_shape is not None:
-                    target_cost_values_batch = cost_values[batch_idx]
-                    cost_returns_batch = cost_returns[batch_idx]
-                    cost_advantages_batch = cost_advantages[batch_idx]
-                else:
-                    target_cost_values_batch = None
-                    cost_returns_batch = None
-                    cost_advantages_batch = None
-
                 # yield the mini-batch
                 yield obs_batch, privileged_observations_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (
                     None,
                     None,
-                ), None, rnd_state_batch, target_cost_values_batch, cost_returns_batch, cost_advantages_batch  # MIPO
+                ), None, rnd_state_batch
 
     # for reinfrocement learning with recurrent networks
     def recurrent_mini_batch_generator(self, num_mini_batches, num_epochs=8):
@@ -343,12 +288,6 @@ class RolloutStorage:
                 values_batch = self.values[:, start:stop]
                 old_actions_log_prob_batch = self.actions_log_prob[:, start:stop]
 
-                # for constraints
-                if self.constraints_shape is not None:
-                    cost_values_batch = self.cost_values[:, start:stop]
-                    cost_returns_batch = self.cost_returns[:, start:stop]
-                    cost_advantages_batch = self.cost_advantages[:, start:stop]
-
                 # reshape to [num_envs, time, num layers, hidden dim] (original shape: [time, num_layers, num_envs, hidden_dim])
                 # then take only time steps after dones (flattens num envs and time dimensions),
                 # take a batch of trajectories and finally reshape back to [num_layers, batch, hidden_dim]
@@ -372,6 +311,6 @@ class RolloutStorage:
                 yield obs_batch, privileged_obs_batch, actions_batch, values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (
                     hid_a_batch,
                     hid_c_batch,
-                ), masks_batch, rnd_state_batch, cost_values_batch, cost_advantages_batch, cost_returns_batch,
+                ), masks_batch, rnd_state_batch
 
                 first_traj = last_traj

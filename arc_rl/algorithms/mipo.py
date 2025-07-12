@@ -1,8 +1,3 @@
-# Copyright (c) 2021-2025, ETH Zurich and NVIDIA CORPORATION
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
-
 # ******************************************************************************
 #  ARC_RL
 #
@@ -28,7 +23,7 @@ from itertools import chain
 
 from arc_rl.modules import ActorCritic, MultiheadMLP
 from arc_rl.modules.rnd import RandomNetworkDistillation
-from arc_rl.storage import RolloutStorage
+from arc_rl.storage import RolloutConstraintStorage
 from arc_rl.utils import string_to_callable
 
 
@@ -127,15 +122,16 @@ class MIPO:
         )  # actor optimizer
         self.critic_optimizer = optim.Adam(self.policy.critic.parameters(), lr=critic_learning_rate)  # critic optimizer
         # Create rollout storage
-        self.storage: RolloutStorage = None  # type: ignore
-        self.transition = RolloutStorage.Transition()
+        self.storage: RolloutConstraintStorage = None  # type: ignore
+        self.transition = RolloutConstraintStorage.Transition()
         self.num_constraints = num_constraints
+        self.desired_constraint_thresholds = torch.full((num_constraints,), 0.1, dtype=torch.float32, device=device)
         self.initial_constraint_limits = (
             torch.tensor(initial_constraint_limits, dtype=torch.float32, device=device)
             if initial_constraint_limits is not None
             else torch.zeros(num_constraints, dtype=torch.float32, device=device)
         )
-        self.adaptive_constraint_limit = self.initial_constraint_limits
+        self.adaptive_constraint_limit = self.initial_constraint_limits.clone()
         # Create constraint critic
         self.constraint_critic = MultiheadMLP(
             input_dim=self.policy.critic_obs_dim,
@@ -194,7 +190,7 @@ class MIPO:
             rnd_state_shape = None
 
         # create rollout storage
-        self.storage = RolloutStorage(
+        self.storage = RolloutConstraintStorage(
             training_type,
             num_envs,
             num_transitions_per_env,
@@ -251,10 +247,10 @@ class MIPO:
 
         if costs is not None:
             # costs: Tensor of shape (num_envs, cost_dim)
-            self.transition.costs = costs.clone()
+            self.transition.costs = torch.clamp(self.initial_constraint_limits - costs.clone(), min=0.0)
         else:
             # if costs are not provided, we assume no costs
-            self.transition.costs = torch.zeros(rewards.shape[0], 1, device=self.device)
+            self.transition.costs = torch.zeros(self.num_constraints, 1, device=self.device)
 
         # record the transition
         self.storage.add_transitions(self.transition)
@@ -306,12 +302,12 @@ class MIPO:
                 all_cost_values = all_cost_values.view(-1, all_cost_values.shape[-1])
                 mean_cost_values = all_cost_values.mean(dim=0)  # shape: (num_constraints,)
 
-                initial = self.initial_constraint_limits.to(self.device).view(-1)
+                initial = self.desired_constraint_thresholds.view(-1)
                 self.adaptive_constraint_limit = torch.maximum(
                     initial,
                     mean_cost_values + self.constraint_limit_alpha * initial
                 )
-                print("Adaptive constraint limits:", self.adaptive_constraint_limit, self.adaptive_constraint_limit.shape)
+                print("Adaptive constraint limits:", self.adaptive_constraint_limit, initial, mean_cost_values)
         else:
             mean_constraint_value_loss = None
 
@@ -336,6 +332,7 @@ class MIPO:
             masks_batch,
             rnd_state_batch,
             # for constraints
+            costs_batch,
             target_cost_values_batch,
             cost_returns_batch,
             cost_advantages_batch,
@@ -380,6 +377,7 @@ class MIPO:
                 returns_batch = returns_batch.repeat(num_aug, 1)
                 if self.constraint_critic is not None:
                     # -- constraints
+                    costs_batch = costs_batch.repeat(num_aug, 1)
                     target_cost_values_batch = target_cost_values_batch.repeat(num_aug, 1, 1)
                     cost_returns_batch = cost_returns_batch.repeat(num_aug, 1, 1)
                     cost_advantages_batch = cost_advantages_batch.repeat(num_aug, 1, 1)
@@ -462,7 +460,7 @@ class MIPO:
 
             # Constraint critic loss
             if self.constraint_critic is not None:
-                constraint_value_loss = (cost_values_batch - cost_returns_batch).pow(2).mean() # type: ignore
+                constraint_value_loss = (cost_values_batch - costs_batch).pow(2).mean() # type: ignore cost_returns_batch
 
                 # cost_values_batch: shape (batch_size, num_constraints)
                 # adaptive_constraint_limit: shape (num_constraints,) or list of scalars
