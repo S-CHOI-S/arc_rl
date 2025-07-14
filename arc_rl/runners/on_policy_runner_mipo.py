@@ -83,12 +83,23 @@ class OnPolicyRunnerMIPO(OnPolicyRunnerAPPO):
             self.alg_cfg["symmetry_cfg"]["_env"] = env
 
         if "auxiliary_cfg" in self.alg_cfg and self.alg_cfg["auxiliary_cfg"] is not None:
-            from arc_rl.modules.aux_mlp import AuxiliaryMLP
-
+            if self.alg_cfg["auxiliary_cfg"]["class_name"] == "AuxiliaryMLP":
+                from arc_rl.modules.auxiliary import AuxiliaryMLP
+                auxiliary_model = AuxiliaryMLP(
+                    input_dim=num_obs, output_dim=3, hidden_dims=self.alg_cfg["auxiliary_cfg"]["hidden_dims"]
+                )
+            elif self.alg_cfg["auxiliary_cfg"]["class_name"] == "AuxiliaryGRU":
+                from arc_rl.modules.auxiliary import AuxiliaryGRU
+                auxiliary_model = AuxiliaryGRU(
+                    observation_dim=num_obs,
+                    hidden_dim=self.alg_cfg["auxiliary_cfg"]["hidden_dim"],
+                    output_dim=3,
+                    n_layers=self.alg_cfg["auxiliary_cfg"]["n_layers"],
+                )
+            else:
+                raise ValueError(f"Unsupported auxiliary model: {self.alg_cfg['auxiliary_cfg']['class_name']}")
+            # add auxiliary model to the algorithm config
             self.alg_cfg["auxiliary_lr"] = self.alg_cfg["auxiliary_cfg"]["learning_rate"]
-            auxiliary_model = AuxiliaryMLP(
-                input_dim=num_obs, output_dim=3, hidden_dims=self.alg_cfg["auxiliary_cfg"]["hidden_dims"]
-            )
             self.alg_cfg["auxiliary_cfg"] = auxiliary_model
 
         # store training configuration
