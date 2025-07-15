@@ -10,6 +10,9 @@ from .rnd_cfg import *
 from .symmetry_cfg import *
 from .auxiliary_cfg import *
 from .constraint_cfg import *
+
+from .exporter import export_policy_as_jit, export_critic_as_jit, export_policy_as_onnx, export_critic_as_onnx
+
 from .utils import (
     resolve_nn_activation,
     split_and_pad_trajectories,
