@@ -1,8 +1,3 @@
-# Copyright (c) 2021-2025, ETH Zurich and NVIDIA CORPORATION
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
-
 # ******************************************************************************
 #  ARC_RL
 #
@@ -188,7 +183,7 @@ class APPO:
         self.transition.privileged_observations = critic_obs
         return self.transition.actions
 
-    def process_env_step(self, rewards, dones, infos):
+    def process_env_step(self, rewards, dones, infos, costs=None):
         # Record the rewards and dones
         # Note: we clone here because later on we bootstrap the rewards based on timeouts
         self.transition.rewards = rewards.clone()

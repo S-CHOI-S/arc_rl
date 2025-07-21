@@ -66,6 +66,7 @@ algorithm:
 
   # -- Auxiliary MLP
   auxiliary_cfg:
+    class_name: AuxiliaryMLP
     hidden_dims: [32, 32]
     learning_rate: 0.001
 

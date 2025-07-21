@@ -86,7 +86,7 @@ class VecEnv(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def step(self, actions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict]:
+    def step(self, actions: torch.Tensor, is_constrained) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         """Apply input action on the environment.
 
         The extra information is a dictionary. It includes metrics such as the episode reward, episode length,
@@ -94,6 +94,7 @@ class VecEnv(ABC):
 
         Args:
             actions: Input actions to apply. Shape: (num_envs, num_actions)
+            is_constrained: Boolean indicating if the state/action is constrained.
 
         Returns:
             A tuple containing the observations, rewards, dones and extra information (metrics).

@@ -103,7 +103,7 @@ class Distillation:
         self.transition.privileged_observations = teacher_obs
         return self.transition.actions
 
-    def process_env_step(self, rewards, dones, infos):
+    def process_env_step(self, rewards, dones, infos, costs=None):
         # record the rewards and dones
         self.transition.rewards = rewards
         self.transition.dones = dones

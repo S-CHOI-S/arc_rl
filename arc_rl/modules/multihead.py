@@ -43,5 +43,5 @@ class MultiheadMLP(nn.Module):
 
         print(f"Multihead MLP: {self.multihead}")
 
-    def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.multihead(obs)
+    def forward(self, critic_obs, masks=None, hidden_states=None) -> torch.Tensor:
+        return self.multihead(critic_obs)
