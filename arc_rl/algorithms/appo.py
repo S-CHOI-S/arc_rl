@@ -421,9 +421,16 @@ class APPO:
                 rnd_loss = mseloss(predicted_embedding, target_embedding)
 
             if self.auxiliary is not None and self.auxiliary_optimizer is not None:
-                base_velocity_target = critic_obs_batch[:, :3]
+                batch_size = input_seq.size(0)  # (B, T, D)
+                hidden = self.auxiliary.init_hidden(batch_size)
 
-                auxiliary_pred = self.auxiliary(obs_batch.detach())
+                # 예측
+                auxiliary_pred, _ = self.auxiliary(input_seq.detach(), hidden)  # (B, 3)
+
+                # 타겟은 현재 base velocity (마지막 timestep의 값)
+                base_velocity_target = critic_obs_batch[:, -1, :3]  # (B, 3)
+
+                # loss 계산
                 auxiliary_loss = nn.functional.mse_loss(auxiliary_pred, base_velocity_target)
 
                 self.auxiliary_optimizer.zero_grad()

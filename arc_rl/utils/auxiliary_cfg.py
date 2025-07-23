@@ -25,14 +25,17 @@ class ArcRlAuxiliaryCfg:
     representation of the environment that is useful for the main task.
     """
 
+    class_name: str = "AuxiliaryMLP"
+    """The class name for the auxiliary configuration. Default is [AuxiliaryMLP]."""
+
     input_dim: int = 45
     """The input dimension for the auxiliary training. Default is 45."""
 
     output_dim: int = 3
     """The output dimension for the auxiliary training. Default is 3."""
 
-    hidden_dims: list[int] = [32, 32]
-    """The hidden dimensions for the auxiliary training. Default is [32, 32]."""
+    hidden_dim: int = 32
+    """The hidden dimension for the auxiliary training. Default is 32."""
 
     learning_rate: float = 1.0e-4
     """The learning rate for the auxiliary training. Default is 1.0e-4."""

@@ -59,7 +59,7 @@ class AuxiliaryGRU(nn.Module):
             input_size=observation_dim,
             hidden_size=hidden_dim,
             num_layers=n_layers,
-            batch_first=True  # (batch_size, sequence_length, feature_dim)
+            batch_first=True
         )
 
         self.fc = nn.Linear(hidden_dim, output_dim)
@@ -68,29 +68,15 @@ class AuxiliaryGRU(nn.Module):
 
     def forward(self, x, hidden):
         """
-        Args:
-            x (torch.Tensor): input data (batch_size, sequence_length, observation_dim)
-            hidden (torch.Tensor): initial hidden state of GRU (n_layers, batch_size, hidden_dim)
-
-        Returns:
-            torch.Tensor: output data (batch_size, sequence_length, output_dim)
-            torch.Tensor: last hidden state of GRU (n_layers, batch_size, hidden_dim)
+        x: (batch_size, seq_len, observation_dim)
+        hidden: (n_layers, batch_size, hidden_dim)
+        returns: (batch_size, output_dim)
         """
-        out, hidden = self.gru(x, hidden)
-
-        prediction = self.fc(out)
-        
+        out, hidden = self.gru(x, hidden)        # out: (B, T, H)
+        last_out = out[:, -1, :]                 # last timestep (B, H)
+        prediction = self.fc(last_out)           # (B, output_dim)
         return prediction, hidden
 
     def init_hidden(self, batch_size):
-        """
-        Args:
-            batch_size (int): batch size for the hidden state.
-
-        Returns:
-            torch.Tensor: initial hidden state of the GRU (n_layers, batch_size, hidden_dim)
-        """
         device = next(self.parameters()).device
-        hidden = torch.zeros(self.n_layers, batch_size, self.hidden_dim).to(device)
-        return hidden
-
+        return torch.zeros(self.n_layers, batch_size, self.hidden_dim).to(device)
