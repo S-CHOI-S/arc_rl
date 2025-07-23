@@ -20,3 +20,5 @@ from .utils import (
     string_to_callable,
     unpad_trajectories,
 )
+
+from .vecenv_wrapper import *

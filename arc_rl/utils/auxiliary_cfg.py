@@ -36,3 +36,6 @@ class ArcRlAuxiliaryCfg:
 
     learning_rate: float = 1.0e-4
     """The learning rate for the auxiliary training. Default is 1.0e-4."""
+
+    linvel_fcn: callable = MISSING
+    """Function to compute the linear velocity auxiliary task. Must be defined in the training script."""
